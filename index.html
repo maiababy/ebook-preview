@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Ebook preview</title>
+<style>
+:root{--ink:#1f2f4a;--soft:#5b6a80;--bg:#f6f2ec;--card:#fff;--acc:#c0583b;--line:#e3ddd3;}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Gill Sans","Gill Sans MT",Calibri,"Segoe UI",sans-serif;padding:0 16px}
+main{max-width:1100px;margin:0 auto;padding-block:40px 60px}
+h1{font-weight:600;font-size:28px;margin:0 0 4px;letter-spacing:.01em}
+.sub{color:var(--soft);margin:0 0 28px}
+#lock{max-width:380px;margin:12vh auto 0;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:28px}
+#lock label{display:block;font-size:14px;color:var(--soft);margin:18px 0 6px}
+#lock input{width:100%;font:inherit;padding:10px 12px;border:1px solid #c9c1b4;border-radius:6px}
+button,.btn{font:inherit;background:var(--ink);color:#fff;border:0;border-radius:6px;padding:10px 16px;cursor:pointer;text-decoration:none;display:inline-block}
+#lock button{margin-top:14px;width:100%}
+#msg{min-height:1.5em;color:var(--acc);font-size:14px;margin:10px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:22px}
+.book{background:none;border:0;padding:0;text-align:left;color:inherit;cursor:pointer;font:inherit}
+.book img{width:100%;aspect-ratio:148/210;object-fit:cover;display:block;border-radius:3px;box-shadow:0 2px 10px rgba(31,47,74,.18);transition:transform .15s}
+.book:hover img{transform:translateY(-3px)}
+.book b{display:block;margin-top:10px;font-weight:600;line-height:1.25}
+.book span{font-size:13px;color:var(--soft)}
+#viewer{position:fixed;inset:0;background:#2a2f38;display:flex;flex-direction:column;z-index:5}
+#viewer header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:var(--ink);color:#fff}
+#viewer header strong{flex:1;min-width:160px;font-weight:600}
+#viewer header .btn,#viewer header button{background:#fff;color:var(--ink);padding:7px 12px;font-size:14px}
+#viewer iframe{flex:1;border:0;width:100%;background:#fff}
+#status{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:20px;font-size:14px;z-index:9}
+</style>
+</head>
+<body>
+<main>
+  <form id="lock">
+    <h1>Maia Baby</h1>
+    <p class="sub" style="margin:0">Ebook preview. Private.</p>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" autocomplete="current-password" autofocus>
+    <button type="submit">Unlock</button>
+    <p id="msg"></p>
+  </form>
+  <section id="shelf" hidden>
+    <h1>The 15 ebooks</h1>
+    <p class="sub">Draft for review, 29 September 2026. Click a cover to read it.</p>
+    <div class="grid" id="grid"></div>
+  </section>
+</main>
+<div id="viewer" hidden>
+  <header><strong id="vt"></strong><a class="btn" id="vopen" target="_blank" rel="noopener">Open in new tab</a><a class="btn" id="vdl">Download</a><button id="vclose">Close</button></header>
+  <iframe id="vf" title="Ebook"></iframe>
+</div>
+<div id="status" hidden></div>
+<script>
+let key, books, cur;
+const $ = id => document.getElementById(id);
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+function status(t){ $('status').textContent = t || ''; $('status').hidden = !t; }
+async function getBin(p){ const r = await fetch(p); if(!r.ok) throw new Error('fetch'); return new Uint8Array(await r.arrayBuffer()); }
+async function dec(buf){ return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM', iv:buf.slice(0,12)}, key, buf.slice(12))); }
+async function unlock(pw){
+  const prm = await (await fetch('b/params.json')).json();
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  key = await crypto.subtle.deriveKey({name:'PBKDF2', salt:b64(prm.salt), iterations:prm.iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  books = JSON.parse(new TextDecoder().decode(await dec(await getBin('b/manifest.bin'))));
+}
+function shelf(){
+  $('lock').hidden = true; $('shelf').hidden = false;
+  $('grid').innerHTML = books.map((b,i) => `<button class="book" data-i="${i}"><img alt="" src="data:image/jpeg;base64,${b.cover}"><b>${b.nn}. ${b.title}</b><span>${b.by} · ${b.mb} MB</span></button>`).join('');
+  $('grid').onclick = e => { const el = e.target.closest('.book'); if(el) openBook(books[el.dataset.i]); };
+}
+async function openBook(b){
+  status('Opening ' + b.title + '…');
+  try{
+    const pdf = await dec(await getBin('b/' + b.nn + '.bin'));
+    if(cur) URL.revokeObjectURL(cur);
+    cur = URL.createObjectURL(new Blob([pdf], {type:'application/pdf'}));
+    $('vt').textContent = b.nn + '. ' + b.title; $('vf').src = cur; $('vopen').href = cur;
+    $('vdl').href = cur; $('vdl').download = b.file;
+    $('viewer').hidden = false; status('');
+  }catch(e){ status('Could not open this book. Try again.'); setTimeout(() => status(''), 3000); }
+}
+$('vclose').onclick = () => { $('viewer').hidden = true; $('vf').src = 'about:blank'; };
+$('lock').onsubmit = async e => {
+  e.preventDefault(); $('msg').textContent = 'Unlocking…';
+  const pw = $('pw').value.trim();
+  try{ await unlock(pw); try{ sessionStorage.setItem('pw', pw); }catch(_){} shelf(); }
+  catch(_){ $('msg').textContent = 'That password is not right.'; }
+};
+(async () => { let pw; try{ pw = sessionStorage.getItem('pw'); }catch(_){} if(pw){ try{ await unlock(pw); shelf(); }catch(_){} } })();
+</script>
+</body>
+</html>
